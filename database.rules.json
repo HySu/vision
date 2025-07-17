@@ -1,0 +1,26 @@
+{
+  "rules": {
+    "rooms": {
+      "$roomId": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "messages": {
+          "$messageId": {
+            ".validate": "newData.hasChildren(['senderId', 'message', 'timestamp'])"
+          }
+        },
+        "participants": {
+          "$participantId": {
+            ".validate": "newData.hasChildren(['name', 'joinedAt'])"
+          }
+        }
+      }
+    },
+    "users": {
+      "$userId": {
+        ".read": "auth != null && auth.uid == $userId",
+        ".write": "auth != null && auth.uid == $userId"
+      }
+    }
+  }
+}

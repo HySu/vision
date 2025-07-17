@@ -4,10 +4,15 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { Server } = require('socket.io');
+const initializeFirebaseAdmin = require('./src/config/firebaseAdmin');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
+
+// Initialize Firebase Admin
+const admin = initializeFirebaseAdmin();
+const db = admin.database();
 
 app.use(express.static(path.join(__dirname, 'build')));
 
@@ -72,34 +77,54 @@ const users = new Map();
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
-  socket.on('join-room', ({ roomId, userName }) => {
+  socket.on('join-room', async ({ roomId, userName, userId }) => {
     console.log(`🔗 User ${userName} (${socket.id}) trying to join room ${roomId}`);
     
-    socket.join(roomId);
-    
-    const user = {
-      id: socket.id,
-      name: userName,
-      roomId: roomId
-    };
-    
-    users.set(socket.id, user);
-    
-    if (!rooms.has(roomId)) {
-      rooms.set(roomId, new Set());
+    try {
+      // Verify user authentication if userId is provided
+      if (userId) {
+        await admin.auth().getUser(userId);
+      }
+
+      socket.join(roomId);
+      
+      const user = {
+        id: socket.id,
+        name: userName,
+        roomId: roomId,
+        userId: userId || null,
+        joinedAt: new Date().toISOString()
+      };
+      
+      users.set(socket.id, user);
+      
+      if (!rooms.has(roomId)) {
+        rooms.set(roomId, new Set());
+      }
+      
+      rooms.get(roomId).add(socket.id);
+
+      // Save room participant to Firebase
+      await db.ref(`rooms/${roomId}/participants/${socket.id}`).set({
+        name: userName,
+        userId: userId || null,
+        joinedAt: user.joinedAt
+      });
+      
+      // Notify existing users about new user
+      socket.to(roomId).emit('user-joined', user);
+      
+      // Send current room users to new user
+      const roomUsers = Array.from(rooms.get(roomId)).map(userId => users.get(userId));
+      socket.emit('room-users', roomUsers);
+      
+      console.log(`✅ User ${userName} joined room ${roomId}. Room now has ${roomUsers.length} users`);
+      console.log(`📋 Current users in room ${roomId}:`, roomUsers.map(u => u.name));
+      
+    } catch (error) {
+      console.error('Error joining room:', error);
+      socket.emit('error', { message: 'Failed to join room' });
     }
-    
-    rooms.get(roomId).add(socket.id);
-    
-    // Notify existing users about new user
-    socket.to(roomId).emit('user-joined', user);
-    
-    // Send current room users to new user
-    const roomUsers = Array.from(rooms.get(roomId)).map(userId => users.get(userId));
-    socket.emit('room-users', roomUsers);
-    
-    console.log(`✅ User ${userName} joined room ${roomId}. Room now has ${roomUsers.length} users`);
-    console.log(`📋 Current users in room ${roomId}:`, roomUsers.map(u => u.name));
   });
 
   socket.on('offer', ({ offer, to }) => {
@@ -126,15 +151,29 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('chat-message', ({ message, roomId }) => {
+  socket.on('chat-message', async ({ message, roomId }) => {
     const user = users.get(socket.id);
     if (user && rooms.has(roomId)) {
-      io.to(roomId).emit('chat-message', {
+      const chatMessage = {
         message: message,
         sender: user.name,
         senderId: socket.id,
+        userId: user.userId,
         timestamp: new Date().toISOString()
-      });
+      };
+
+      try {
+        // Save message to Firebase
+        await db.ref(`rooms/${roomId}/messages`).push(chatMessage);
+        
+        // Emit to all users in room
+        io.to(roomId).emit('chat-message', chatMessage);
+        
+        console.log(`💬 Message saved to Firebase from ${user.name} in room ${roomId}`);
+      } catch (error) {
+        console.error('Error saving message:', error);
+        socket.emit('error', { message: 'Failed to send message' });
+      }
     }
   });
 
@@ -149,20 +188,29 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
     const user = users.get(socket.id);
     if (user) {
       const roomId = user.roomId;
-      if (rooms.has(roomId)) {
-        rooms.get(roomId).delete(socket.id);
-        if (rooms.get(roomId).size === 0) {
-          rooms.delete(roomId);
-        } else {
-          socket.to(roomId).emit('user-left', { userId: socket.id });
+      try {
+        // Remove participant from Firebase
+        await db.ref(`rooms/${roomId}/participants/${socket.id}`).remove();
+        
+        if (rooms.has(roomId)) {
+          rooms.get(roomId).delete(socket.id);
+          if (rooms.get(roomId).size === 0) {
+            rooms.delete(roomId);
+            // Optionally clean up empty room from Firebase
+            await db.ref(`rooms/${roomId}`).remove();
+          } else {
+            socket.to(roomId).emit('user-left', { userId: socket.id });
+          }
         }
+        users.delete(socket.id);
+        console.log(`User ${user.name} disconnected from room ${roomId}`);
+      } catch (error) {
+        console.error('Error cleaning up user disconnect:', error);
       }
-      users.delete(socket.id);
-      console.log(`User ${user.name} disconnected from room ${roomId}`);
     }
   });
 });
