@@ -4,15 +4,25 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { Server } = require('socket.io');
-const initializeFirebaseAdmin = require('./src/config/firebaseAdmin');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 
-// Initialize Firebase Admin
-const admin = initializeFirebaseAdmin();
-const db = admin.database();
+// Firebase Admin - Optional (only initialize if environment variables are set)
+let admin = null;
+let db = null;
+
+if (process.env.FIREBASE_PROJECT_ID) {
+  try {
+    const initializeFirebaseAdmin = require('./src/config/firebaseAdmin');
+    admin = initializeFirebaseAdmin();
+    db = admin.database();
+    console.log('Firebase Admin initialized successfully');
+  } catch (error) {
+    console.log('Firebase Admin initialization failed, running without Firebase:', error.message);
+  }
+}
 
 app.use(express.static(path.join(__dirname, 'build')));
 
@@ -81,8 +91,8 @@ io.on('connection', (socket) => {
     console.log(`🔗 User ${userName} (${socket.id}) trying to join room ${roomId}`);
     
     try {
-      // Verify user authentication if userId is provided
-      if (userId) {
+      // Verify user authentication if userId is provided and Firebase is available
+      if (userId && admin) {
         await admin.auth().getUser(userId);
       }
 
@@ -104,12 +114,18 @@ io.on('connection', (socket) => {
       
       rooms.get(roomId).add(socket.id);
 
-      // Save room participant to Firebase
-      await db.ref(`rooms/${roomId}/participants/${socket.id}`).set({
-        name: userName,
-        userId: userId || null,
-        joinedAt: user.joinedAt
-      });
+      // Save room participant to Firebase (if available)
+      if (db) {
+        try {
+          await db.ref(`rooms/${roomId}/participants/${socket.id}`).set({
+            name: userName,
+            userId: userId || null,
+            joinedAt: user.joinedAt
+          });
+        } catch (fbError) {
+          console.log('Firebase save failed, continuing without it:', fbError.message);
+        }
+      }
       
       // Notify existing users about new user
       socket.to(roomId).emit('user-joined', user);
@@ -163,15 +179,21 @@ io.on('connection', (socket) => {
       };
 
       try {
-        // Save message to Firebase
-        await db.ref(`rooms/${roomId}/messages`).push(chatMessage);
+        // Save message to Firebase (if available)
+        if (db) {
+          try {
+            await db.ref(`rooms/${roomId}/messages`).push(chatMessage);
+            console.log(`💬 Message saved to Firebase from ${user.name} in room ${roomId}`);
+          } catch (fbError) {
+            console.log('Firebase message save failed, continuing without it:', fbError.message);
+          }
+        }
         
         // Emit to all users in room
         io.to(roomId).emit('chat-message', chatMessage);
         
-        console.log(`💬 Message saved to Firebase from ${user.name} in room ${roomId}`);
       } catch (error) {
-        console.error('Error saving message:', error);
+        console.error('Error sending message:', error);
         socket.emit('error', { message: 'Failed to send message' });
       }
     }
@@ -193,15 +215,27 @@ io.on('connection', (socket) => {
     if (user) {
       const roomId = user.roomId;
       try {
-        // Remove participant from Firebase
-        await db.ref(`rooms/${roomId}/participants/${socket.id}`).remove();
+        // Remove participant from Firebase (if available)
+        if (db) {
+          try {
+            await db.ref(`rooms/${roomId}/participants/${socket.id}`).remove();
+          } catch (fbError) {
+            console.log('Firebase participant removal failed:', fbError.message);
+          }
+        }
         
         if (rooms.has(roomId)) {
           rooms.get(roomId).delete(socket.id);
           if (rooms.get(roomId).size === 0) {
             rooms.delete(roomId);
-            // Optionally clean up empty room from Firebase
-            await db.ref(`rooms/${roomId}`).remove();
+            // Optionally clean up empty room from Firebase (if available)
+            if (db) {
+              try {
+                await db.ref(`rooms/${roomId}`).remove();
+              } catch (fbError) {
+                console.log('Firebase room cleanup failed:', fbError.message);
+              }
+            }
           } else {
             socket.to(roomId).emit('user-left', { userId: socket.id });
           }

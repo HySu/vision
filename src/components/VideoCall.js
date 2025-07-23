@@ -23,8 +23,8 @@ function VideoCall({ participant, isLocal = false }) {
           {participant.name} {isLocal && '(나)'}
         </span>
         <div className="participant-status">
-          {participant.isMuted && <span className="status-icon">🔇</span>}
-          {participant.isVideoOff && <span className="status-icon">📹</span>}
+          {!participant.isMicOn && <span className="status-icon">🔇</span>}
+          {!participant.isCameraOn && <span className="status-icon">📹</span>}
         </div>
       </div>
     </div>

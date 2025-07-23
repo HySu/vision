@@ -18,8 +18,8 @@ function ParticipantsList({ participants }) {
                 {participant.name} {participant.isLocal && '(나)'}
               </span>
               <div className="participant-status">
-                {participant.isMuted && <span className="status-icon muted">🔇</span>}
-                {participant.isVideoOff && <span className="status-icon video-off">📹</span>}
+                {!participant.isMicOn && <span className="status-icon muted">🔇</span>}
+                {!participant.isCameraOn && <span className="status-icon video-off">📹</span>}
                 {participant.isLocal && <span className="status-badge">호스트</span>}
               </div>
             </div>

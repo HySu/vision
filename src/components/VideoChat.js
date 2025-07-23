@@ -54,8 +54,19 @@ function VideoChat({ userName, roomId, onLeave }) {
       // Setup Socket Events
       setupSocketEvents(socket);
       
-      // Join Room
-      socket.emit('join-room', { roomId, userName });
+      // Add local user to participants immediately
+      setParticipants([{
+        id: socket.id,
+        name: userName,
+        roomId: roomId,
+        isLocal: true,
+        isCameraOn: true,
+        isMicOn: true,
+        stream: stream
+      }]);
+      
+      // Join Room  
+      socket.emit('join-room', { roomId, userName, userId: null });
       
       setIsConnected(true);
     } catch (error) {
@@ -66,12 +77,26 @@ function VideoChat({ userName, roomId, onLeave }) {
   const setupSocketEvents = (socket) => {
     socket.on('room-users', (users) => {
       debug.log('방 참가자 목록:', users);
-      setParticipants(users.map(user => ({
-        ...user,
-        isLocal: user.id === socket.id,
-        isCameraOn: true,
-        isMicOn: true
-      })));
+      setParticipants(prev => {
+        // Keep the local user that was already added
+        const localUser = prev.find(p => p.isLocal);
+        
+        // Map remote users from server data
+        const remoteUsers = users
+          .filter(user => user.id !== socket.id)
+          .map(user => ({
+            ...user,
+            isLocal: false,
+            isCameraOn: true,
+            isMicOn: true
+          }));
+        
+        // Combine local and remote users
+        const allUsers = localUser ? [localUser, ...remoteUsers] : remoteUsers;
+        
+        debug.log('Updated participants:', allUsers);
+        return allUsers;
+      });
     });
 
     socket.on('user-joined', (user) => {
@@ -129,7 +154,7 @@ function VideoChat({ userName, roomId, onLeave }) {
     try {
       debug.log('새 사용자와 WebRTC 연결 시작:', user.id);
       if (webRTCManager.current) {
-        const peerConnection = await webRTCManager.current.createPeerConnection(user.id);
+        await webRTCManager.current.createPeerConnection(user.id);
         const offer = await webRTCManager.current.createOffer(user.id);
         debug.log('Offer 생성 완료, 전송:', user.id);
         socketConnection.emit('offer', { offer, to: user.id });
