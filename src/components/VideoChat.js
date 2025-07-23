@@ -26,14 +26,38 @@ function VideoChat({ userName, roomId, onLeave }) {
 
   const initializeConnection = async () => {
     try {
+      console.log('🔄 Initializing connection...');
+      
       // Initialize WebRTC Manager
       webRTCManager.current = new WebRTCManager();
+      console.log('✅ WebRTC Manager initialized');
       
       // Initialize Socket Connection
       const socket = socketConnection.connect();
+      console.log('🔌 Socket connection initiated');
+      
+      // Wait for socket connection
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Socket connection timeout'));
+        }, 10000);
+        
+        socket.on('connect', () => {
+          clearTimeout(timeout);
+          console.log('✅ Socket connected successfully');
+          resolve();
+        });
+        
+        socket.on('connect_error', (error) => {
+          clearTimeout(timeout);
+          console.error('❌ Socket connection failed:', error);
+          reject(error);
+        });
+      });
       
       // Initialize Media
       const stream = await initializeMedia();
+      console.log('✅ Media initialized');
       
       // Set local stream to WebRTC Manager
       if (webRTCManager.current && stream) {

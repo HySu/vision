@@ -4,11 +4,18 @@ export class WebRTCManager {
     this.localStream = null;
     this.configuration = {
       iceServers: [
+        // Google STUN servers
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun3.l.google.com:19302' },
         { urls: 'stun:stun4.l.google.com:19302' },
+        
+        // Additional STUN servers for better reliability
+        { urls: 'stun:stun.cloudflare.com:3478' },
+        { urls: 'stun:stun.nextcloud.com:443' },
+        
+        // Free TURN servers (for NAT traversal)
         {
           urls: 'turn:relay.metered.ca:80',
           username: 'openrelay',
@@ -18,11 +25,34 @@ export class WebRTCManager {
           urls: 'turn:relay.metered.ca:443',
           username: 'openrelay',
           credential: 'openrelay'
+        },
+        {
+          urls: 'turn:relay.metered.ca:443?transport=tcp',
+          username: 'openrelay',
+          credential: 'openrelay'
+        },
+        
+        // Additional reliable TURN servers
+        {
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelay',
+          credential: 'openrelay'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelay',
+          credential: 'openrelay'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelay',
+          credential: 'openrelay'
         }
       ],
-      iceCandidatePoolSize: 10,
+      iceCandidatePoolSize: 20, // Increased for better connectivity
       bundlePolicy: 'max-bundle',
-      rtcpMuxPolicy: 'require'
+      rtcpMuxPolicy: 'require',
+      iceTransportPolicy: 'all' // Use both STUN and TURN servers
     };
   }
 
